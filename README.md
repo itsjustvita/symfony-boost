@@ -1,5 +1,10 @@
 # Symfony Boost MCP Server
 
+[![Latest Version](https://img.shields.io/packagist/v/itsjustvita/symfony-boost.svg?style=flat-square)](https://packagist.org/packages/itsjustvita/symfony-boost)
+[![Total Downloads](https://img.shields.io/packagist/dt/itsjustvita/symfony-boost.svg?style=flat-square)](https://packagist.org/packages/itsjustvita/symfony-boost)
+[![License](https://img.shields.io/packagist/l/itsjustvita/symfony-boost.svg?style=flat-square)](https://packagist.org/packages/itsjustvita/symfony-boost)
+[![PHP Version](https://img.shields.io/packagist/php-v/itsjustvita/symfony-boost.svg?style=flat-square)](https://packagist.org/packages/itsjustvita/symfony-boost)
+
 > **⚠️ BETA VERSION** - This package is currently in beta. Please report any issues you encounter.
 
 An MCP (Model Context Protocol) server for Symfony projects that provides Claude Code and PhpStorm with advanced functionality.
