@@ -1,0 +1,93 @@
+#!/usr/bin/env php
+<?php
+
+// Find autoloader (works for both development and installed)
+$autoloadPaths = [
+    __DIR__ . '/../vendor/autoload.php',     // Standalone development
+    __DIR__ . '/../../../../autoload.php',   // Installed as Composer package
+];
+
+$autoloaderFound = false;
+foreach ($autoloadPaths as $autoloadPath) {
+    if (file_exists($autoloadPath)) {
+        require_once $autoloadPath;
+        $autoloaderFound = true;
+        break;
+    }
+}
+
+if (!$autoloaderFound) {
+    fwrite(STDERR, "ERROR: Composer autoloader not found!\n");
+    fwrite(STDERR, "Make sure 'composer install' has been executed.\n");
+    exit(1);
+}
+
+use SymfonyBoost\SymfonyBoostServer;
+use SymfonyBoost\InstallCommand;
+use Symfony\Component\Console\Application;
+use Symfony\Component\Dotenv\Dotenv;
+
+// Check if it's a console command (install, --help, etc.)
+$isConsoleCommand = false;
+foreach ($argv as $arg) {
+    if (in_array($arg, ['install', '--help', '-h', '--version', '-V', 'help'])) {
+        $isConsoleCommand = true;
+        break;
+    }
+}
+
+// Console mode (for install, help, etc.)
+if ($isConsoleCommand) {
+    $application = new Application('Symfony Boost', '1.0.0-beta');
+    $application->add(new InstallCommand());
+    $application->run();
+    exit(0);
+}
+
+// MCP server mode (default)
+// Called by Claude Code, runs in stdio mode
+
+// Load .env from current directory (Symfony project)
+$projectPath = getcwd();
+$envFile = $projectPath . '/.env';
+
+if (file_exists($envFile)) {
+    $dotenv = new Dotenv();
+    $dotenv->load($envFile);
+}
+
+// Get DATABASE_URL (check getenv() first, as MCP server passes the variable this way)
+$databaseUrl = getenv('DATABASE_URL') ?: ($_ENV['DATABASE_URL'] ?? null);
+
+if (!$databaseUrl) {
+    fwrite(STDERR, "ERROR: DATABASE_URL not found!\n");
+    fwrite(STDERR, "Make sure DATABASE_URL is set in .env.\n");
+    fwrite(STDERR, "\nTip: Run 'symfony-boost install' to create the configuration.\n");
+    exit(1);
+}
+
+try {
+    $server = new SymfonyBoostServer($databaseUrl, $projectPath);
+
+    // Log for debugging (only to stderr, not stdout!)
+    fwrite(STDERR, "=================================\n");
+    fwrite(STDERR, "Symfony Boost MCP Server v1.0.0-beta\n");
+    fwrite(STDERR, "=================================\n");
+    fwrite(STDERR, "Project: {$projectPath}\n");
+    fwrite(STDERR, "Database: " . parse_url($databaseUrl, PHP_URL_HOST) . "\n");
+    fwrite(STDERR, "Status: Waiting for MCP requests...\n");
+    fwrite(STDERR, "=================================\n\n");
+
+    // Start MCP server (blocks and listens on stdin)
+    $server->run();
+
+} catch (\Exception $e) {
+    fwrite(STDERR, "\n=================================\n");
+    fwrite(STDERR, "ERROR starting server\n");
+    fwrite(STDERR, "=================================\n");
+    fwrite(STDERR, "Error: " . $e->getMessage() . "\n");
+    fwrite(STDERR, "\nStack Trace:\n");
+    fwrite(STDERR, $e->getTraceAsString() . "\n");
+    fwrite(STDERR, "=================================\n");
+    exit(1);
+}
