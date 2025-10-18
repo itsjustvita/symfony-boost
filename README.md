@@ -14,9 +14,11 @@ An MCP (Model Context Protocol) server for Symfony projects that provides Claude
 - 🗄️ **Database Tools**: List tables, describe structure, execute queries
 - 📊 **Doctrine Integration**: List entities, show foreign keys
 - 🛣️ **Routing**: Display all routes
-- 📝 **Logs**: Read log files
+- 📝 **Logs**: Read log files, find last errors
 - 🎯 **Console**: Execute Symfony console commands
-- ℹ️ **App Info**: PHP version, Symfony version, database platform
+- ℹ️ **App Info**: PHP version, Symfony version, database platform, bundles
+- ⚙️ **Configuration**: Get config values, list environment variables
+- 📦 **14 MCP Tools**: Comprehensive toolkit for Symfony development
 
 ## Installation
 
@@ -48,17 +50,32 @@ The tools are now available! Test with: "List all database tables"
 
 ## Available Tools
 
+Symfony Boost comes with **14 powerful MCP tools** designed specifically for Symfony development:
+
+### Application & Configuration
 | Tool | Description |
 |------|-------------|
 | `application_info` | Shows PHP version, Symfony version, database info |
+| `get_config` | Get configuration values using dot notation |
+| `list_env_vars` | Lists all environment variables from .env files |
+| `list_bundles` | Lists all installed Symfony bundles |
+
+### Database Operations
+| Tool | Description |
+|------|-------------|
 | `list_tables` | Lists all database tables |
 | `describe_table` | Shows table structure (columns, indexes) |
 | `list_entities` | Lists all Doctrine entities |
 | `get_table_sizes` | Shows number of rows per table |
 | `show_foreign_keys` | Shows all foreign key constraints |
 | `database_query` | Executes READ-ONLY SQL queries |
+
+### Debugging & Development
+| Tool | Description |
+|------|-------------|
 | `list_routes` | Lists all Symfony routes |
 | `read_logs` | Reads the last N log entries |
+| `last_error` | Reads the last error from application logs |
 | `console_command` | Executes Symfony console commands |
 
 ## Usage
@@ -214,10 +231,12 @@ For issues or questions:
 
 ### 1.0.0-beta (Current)
 - Initial beta release
-- 10 core MCP tools for Symfony development
+- **14 MCP tools** for Symfony development
+- **CLAUDE.md** generation with AI development guidelines
 - Automatic installation command
 - Support for both local and global installation
 - Doctrine DBAL 3.x and 4.x compatibility
+- New tools: `get_config`, `list_env_vars`, `last_error`, `list_bundles`
 
 ---
 
