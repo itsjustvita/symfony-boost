@@ -210,7 +210,10 @@ class InstallCommand extends Command
       return Command::FAILURE;
     }
 
-    // 8. Optional: Add to .gitignore
+    // 8. Create CLAUDE.md with AI guidelines
+    $this->createClaudeMd($projectPath, $io);
+
+    // 9. Optional: Add to .gitignore
     $gitignorePath = $projectPath . '/.gitignore';
     if (file_exists($gitignorePath)) {
       $gitignoreContent = file_get_contents($gitignorePath);
@@ -228,7 +231,7 @@ class InstallCommand extends Command
       }
 
       if ($needsUpdate && $io->confirm('Do you want to add .mcp.json and .claude/ to .gitignore?')) {
-        $addition = "\n# Claude Code MCP Config\n" . implode("\n", $newEntries) . "\n";
+        $addition = "\n# Symfony Boost MCP Config\n" . implode("\n", $newEntries) . "\n";
         file_put_contents($gitignorePath, $gitignoreContent . $addition);
         $io->success('✓ Entries added to .gitignore');
       }
@@ -266,5 +269,154 @@ class InstallCommand extends Command
     $io->info('💡 For issues: symfony-boost install --help');
 
     return Command::SUCCESS;
+  }
+
+  /**
+   * Create CLAUDE.md file with AI development guidelines
+   */
+  private function createClaudeMd(string $projectPath, SymfonyStyle $io): void
+  {
+    $claudeMdPath = $projectPath . '/CLAUDE.md';
+
+    // Check if file already exists
+    if (file_exists($claudeMdPath)) {
+      if (!$io->confirm('CLAUDE.md already exists. Overwrite?', false)) {
+        $io->note('Skipped CLAUDE.md creation');
+        return;
+      }
+    }
+
+    $claudeMdContent = <<<'CLAUDE_MD'
+# Symfony Boost - AI Development Guidelines
+
+This file provides guidance to Claude Code and other AI assistants when working with this Symfony project.
+
+## Symfony Boost MCP Server
+
+This project uses **Symfony Boost**, an MCP server with powerful tools designed specifically for Symfony applications. Always use these tools when available - they provide accurate, project-specific information.
+
+## When to Use Which Tool
+
+### Application Information
+- Use `application_info` to check PHP version, Symfony version, and database platform
+- Use `list_entities` to discover available Doctrine entities before querying
+- Use `list_routes` to see all available routes and their configurations
+
+### Database Operations
+- **Read-only queries**: Use `database_query` for SELECT, SHOW, EXPLAIN, DESCRIBE operations
+  - This tool automatically limits results to 100 rows for safety
+  - Only read-only operations are allowed - no INSERT, UPDATE, DELETE
+- **Schema inspection**: Use `describe_table` to see table structure (columns, indexes, types)
+- **Quick overview**: Use `list_tables` to see all available database tables
+- **Data volume**: Use `get_table_sizes` to see row counts per table
+- **Relationships**: Use `show_foreign_keys` to understand table relationships
+
+### Debugging & Logs
+- Use `read_logs` to check recent application logs (default: last 50 entries)
+- Always check logs after implementing new features or fixing bugs
+- Specify environment: `dev` or `prod` (default is `dev`)
+
+### Console Commands
+- Use `console_command` to execute Symfony console commands
+- Examples:
+  - `console_command cache:clear` - Clear cache
+  - `console_command debug:router` - Debug routes
+  - `console_command make:entity` - Create new entity
+  - `console_command doctrine:schema:update --dump-sql` - Preview schema changes
+
+### Routing
+- Use `list_routes` before suggesting new routes to avoid conflicts
+- Check existing route patterns and naming conventions
+
+## Best Practices
+
+### Database Queries
+1. **Always use `list_tables` first** to see available tables
+2. **Use `describe_table`** to understand table structure before querying
+3. **Check `show_foreign_keys`** to understand relationships
+4. **Then use `database_query`** for actual data retrieval
+
+Example workflow:
+```
+1. list_tables → See all tables
+2. describe_table('users') → See user table structure
+3. database_query("SELECT * FROM users WHERE active = 1") → Get data
+```
+
+### Doctrine Entities
+- Use `list_entities` to see all available Doctrine entities
+- Respect existing entity relationships and naming conventions
+- Follow Doctrine best practices for entity design
+
+### Security
+- **Never suggest** using raw SQL for write operations
+- **Always use** Doctrine ORM for data manipulation (INSERT, UPDATE, DELETE)
+- **Validate** user input before queries
+- **Use** parameterized queries through Doctrine
+
+### Symfony Conventions
+- Follow Symfony directory structure (src/, config/, templates/, etc.)
+- Use dependency injection and autowiring
+- Leverage Symfony's service container
+- Follow PSR-4 autoloading standards
+
+### Testing
+- Suggest PHPUnit tests for new features
+- Use Symfony's test utilities (WebTestCase, KernelTestCase)
+- Test database interactions with fixtures
+
+## Tool Usage Examples
+
+### Exploring a New Project
+```
+1. application_info → Check versions and setup
+2. list_entities → See available models
+3. list_routes → Understand routing structure
+4. list_tables → See database schema
+5. get_table_sizes → Identify main tables
+```
+
+### Debugging Issues
+```
+1. read_logs → Check recent errors
+2. console_command debug:router → Verify routes
+3. console_command debug:container → Check services
+4. database_query → Inspect data
+```
+
+### Building Features
+```
+1. list_routes → Check existing routes
+2. list_entities → See available entities
+3. show_foreign_keys → Understand relationships
+4. console_command make:controller → Generate code
+5. console_command doctrine:schema:update --dump-sql → Preview changes
+```
+
+## Important Reminders
+
+- **Read before write**: Always inspect existing code/schema before suggesting changes
+- **Use the tools**: Don't guess about routes, entities, or schema - use the MCP tools
+- **Follow Symfony**: Stick to Symfony conventions and best practices
+- **Test your suggestions**: Verify routes and commands exist before suggesting them
+- **Check logs**: Always review logs when debugging or after implementing features
+
+## Symfony Version Compatibility
+
+Check the Symfony version using `application_info` tool. Always ensure suggestions are compatible with the detected version.
+
+## Getting Help
+
+- Check Symfony documentation for version-specific features
+- Use `console_command list` to see all available console commands
+- Use `console_command debug:config` to see configuration options
+CLAUDE_MD;
+
+    try {
+      file_put_contents($claudeMdPath, $claudeMdContent);
+      $io->success('✓ CLAUDE.md successfully created!');
+    } catch (\Exception $e) {
+      $io->warning('⚠ Could not create CLAUDE.md: ' . $e->getMessage());
+    }
   }
 }
