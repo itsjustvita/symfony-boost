@@ -36,9 +36,6 @@ class McpServer
    */
   public function run(): void
   {
-    // stderr for logs (stdout is for JSON-RPC!)
-    fwrite(STDERR, "MCP Server started: {$this->serverName} v{$this->serverVersion}\n");
-
     while (true) {
       // Read JSON-RPC message from stdin
       $input = fgets(STDIN);
@@ -60,7 +57,6 @@ class McpServer
           $this->sendResponse($response);
         }
       } catch (\Throwable $e) {
-        fwrite(STDERR, "Error: " . $e->getMessage() . "\n");
         $this->sendError(-32603, 'Internal error: ' . $e->getMessage(), $message['id'] ?? null);
       }
     }
@@ -74,8 +70,6 @@ class McpServer
     $method = $message['method'] ?? null;
     $params = $message['params'] ?? [];
     $id = $message['id'] ?? null;
-
-    fwrite(STDERR, "Received: {$method}\n");
 
     return match ($method) {
       'initialize' => $this->handleInitialize($id, $params),
@@ -165,7 +159,6 @@ class McpServer
         ]
       ];
     } catch (\Throwable $e) {
-      fwrite(STDERR, "Tool error: " . $e->getMessage() . "\n");
       return $this->sendError(-32603, $e->getMessage(), $id);
     }
   }

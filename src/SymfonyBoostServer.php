@@ -36,7 +36,7 @@ class SymfonyBoostServer
     ];
 
     $this->projectPath = realpath($projectPath);
-    $this->server = new McpServer('symfony-boost', '1.0.0-beta.4');
+    $this->server = new McpServer('symfony-boost', '1.0.0-beta.5');
 
     $this->registerTools();
   }

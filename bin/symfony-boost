@@ -38,7 +38,7 @@ foreach ($argv as $arg) {
 
 // Console mode (for install, help, etc.)
 if ($isConsoleCommand) {
-    $application = new Application('Symfony Boost', '1.0.0-beta.4');
+    $application = new Application('Symfony Boost', '1.0.0-beta.5');
     $application->add(new InstallCommand());
     $application->run();
     exit(0);
@@ -47,38 +47,31 @@ if ($isConsoleCommand) {
 // MCP server mode (default)
 // Called by Claude Code, runs in stdio mode
 
-// Load .env from current directory (Symfony project)
 $projectPath = getcwd();
-$envFile = $projectPath . '/.env';
 
-if (file_exists($envFile)) {
-    $dotenv = new Dotenv();
-    $dotenv->load($envFile);
-}
-
-// Get DATABASE_URL (check getenv() first, as MCP server passes the variable this way)
+// Get DATABASE_URL (prioritize env var from MCP config, fallback to .env file)
 $databaseUrl = getenv('DATABASE_URL') ?: ($_ENV['DATABASE_URL'] ?? null);
+
+// Only load .env if DATABASE_URL not already set (optimization for fast startup)
+if (!$databaseUrl) {
+    $envFile = $projectPath . '/.env';
+    if (file_exists($envFile)) {
+        $dotenv = new Dotenv();
+        $dotenv->load($envFile);
+        $databaseUrl = $_ENV['DATABASE_URL'] ?? null;
+    }
+}
 
 if (!$databaseUrl) {
     fwrite(STDERR, "ERROR: DATABASE_URL not found!\n");
-    fwrite(STDERR, "Make sure DATABASE_URL is set in .env.\n");
-    fwrite(STDERR, "\nTip: Run 'symfony-boost install' to create the configuration.\n");
+    fwrite(STDERR, "Make sure DATABASE_URL is set in .env or .mcp.json env field.\n");
     exit(1);
 }
 
 try {
     $server = new SymfonyBoostServer($databaseUrl, $projectPath);
 
-    // Log for debugging (only to stderr, not stdout!)
-    fwrite(STDERR, "=================================\n");
-    fwrite(STDERR, "Symfony Boost MCP Server v1.0.0-beta.4\n");
-    fwrite(STDERR, "=================================\n");
-    fwrite(STDERR, "Project: {$projectPath}\n");
-    fwrite(STDERR, "Database: " . parse_url($databaseUrl, PHP_URL_HOST) . "\n");
-    fwrite(STDERR, "Status: Waiting for MCP requests...\n");
-    fwrite(STDERR, "=================================\n\n");
-
-    // Start MCP server (blocks and listens on stdin)
+    // Start MCP server immediately (blocks and listens on stdin)
     $server->run();
 
 } catch (\Exception $e) {
