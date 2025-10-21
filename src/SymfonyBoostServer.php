@@ -7,7 +7,8 @@ use Doctrine\DBAL\Connection;
 
 class SymfonyBoostServer
 {
-  private Connection $connection;
+  private ?Connection $connection = null;
+  private array $connectionConfig;
   private string $projectPath;
   private McpServer $server;
 
@@ -24,7 +25,8 @@ class SymfonyBoostServer
       default => 'pdo_mysql',
     };
 
-    $config = [
+    // Store connection config for lazy initialization (don't connect yet!)
+    $this->connectionConfig = [
       'driver' => $driver,
       'host' => $parsed['host'] ?? 'localhost',
       'port' => $parsed['port'] ?? 3306,
@@ -33,11 +35,22 @@ class SymfonyBoostServer
       'dbname' => trim($parsed['path'] ?? '', '/'),
     ];
 
-    $this->connection = DriverManager::getConnection($config);
     $this->projectPath = realpath($projectPath);
-    $this->server = new McpServer('symfony-boost', '1.0.0-beta');
+    $this->server = new McpServer('symfony-boost', '1.0.0-beta.4');
 
     $this->registerTools();
+  }
+
+  /**
+   * Lazy connection initialization - only connect to database when actually needed
+   * This speeds up the MCP server startup significantly
+   */
+  private function getConnection(): Connection
+  {
+    if ($this->connection === null) {
+      $this->connection = DriverManager::getConnection($this->connectionConfig);
+    }
+    return $this->connection;
   }
 
   private function registerTools(): void
@@ -48,7 +61,7 @@ class SymfonyBoostServer
       'Returns information about the Symfony application',
       ['type' => 'object', 'properties' => new \stdClass()],
       function() {
-        $platform = $this->connection->getDatabasePlatform();
+        $platform = $this->getConnection()->getDatabasePlatform();
         $platformName = get_class($platform);
         // Extract only the class name without namespace
         $platformName = substr($platformName, strrpos($platformName, '\\') + 1);
@@ -90,7 +103,7 @@ class SymfonyBoostServer
           $query .= " LIMIT {$limit}";
         }
 
-        $result = $this->connection->fetchAllAssociative($query);
+        $result = $this->getConnection()->fetchAllAssociative($query);
 
         return json_encode([
           'rows' => $result,
@@ -105,7 +118,7 @@ class SymfonyBoostServer
       'Lists all database tables',
       ['type' => 'object', 'properties' => new \stdClass()],
       function() {
-        $schemaManager = $this->connection->createSchemaManager();
+        $schemaManager = $this->getConnection()->createSchemaManager();
         $tables = $schemaManager->listTableNames();
 
         return json_encode([
@@ -128,7 +141,7 @@ class SymfonyBoostServer
       ],
       function(array $args) {
         $tableName = $args['table_name'];
-        $schemaManager = $this->connection->createSchemaManager();
+        $schemaManager = $this->getConnection()->createSchemaManager();
 
         $columns = $schemaManager->listTableColumns($tableName);
         $indexes = $schemaManager->listTableIndexes($tableName);
@@ -244,12 +257,12 @@ class SymfonyBoostServer
       'Shows number of rows per table',
       ['type' => 'object', 'properties' => new \stdClass()],
       function() {
-        $schemaManager = $this->connection->createSchemaManager();
+        $schemaManager = $this->getConnection()->createSchemaManager();
         $tables = $schemaManager->listTableNames();
 
         $sizes = [];
         foreach ($tables as $table) {
-          $count = $this->connection->fetchOne("SELECT COUNT(*) FROM `{$table}`");
+          $count = $this->getConnection()->fetchOne("SELECT COUNT(*) FROM `{$table}`");
           $sizes[] = ['table' => $table, 'rows' => (int)$count];
         }
 
@@ -269,7 +282,7 @@ class SymfonyBoostServer
         ]
       ],
       function(array $args) {
-        $schemaManager = $this->connection->createSchemaManager();
+        $schemaManager = $this->getConnection()->createSchemaManager();
         $tables = isset($args['table_name']) ? [$args['table_name']] : $schemaManager->listTableNames();
 
         $result = [];

@@ -38,7 +38,7 @@ foreach ($argv as $arg) {
 
 // Console mode (for install, help, etc.)
 if ($isConsoleCommand) {
-    $application = new Application('Symfony Boost', '1.0.0-beta.3');
+    $application = new Application('Symfony Boost', '1.0.0-beta.4');
     $application->add(new InstallCommand());
     $application->run();
     exit(0);
@@ -71,7 +71,7 @@ try {
 
     // Log for debugging (only to stderr, not stdout!)
     fwrite(STDERR, "=================================\n");
-    fwrite(STDERR, "Symfony Boost MCP Server v1.0.0-beta.3\n");
+    fwrite(STDERR, "Symfony Boost MCP Server v1.0.0-beta.4\n");
     fwrite(STDERR, "=================================\n");
     fwrite(STDERR, "Project: {$projectPath}\n");
     fwrite(STDERR, "Database: " . parse_url($databaseUrl, PHP_URL_HOST) . "\n");
