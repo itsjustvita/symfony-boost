@@ -15,5 +15,31 @@
         "SymfonyBoost\\": "src/"
       }
     },
-    "bin": ["bin/symfony-boost"]
+    "bin": ["bin/symfony-boost"],
+    "scripts": {
+      "post-install-cmd": [
+        "@symfony-boost-info"
+      ],
+      "post-update-cmd": [
+        "@symfony-boost-info"
+      ],
+      "symfony-boost-info": [
+        "echo ''",
+        "echo '╔════════════════════════════════════════════════════╗'",
+        "echo '║  Symfony Boost installed successfully!            ║'",
+        "echo '╚════════════════════════════════════════════════════╝'",
+        "echo ''",
+        "echo 'Next step: Run the installation script'",
+        "echo ''",
+        "echo '  php vendor/bin/symfony-boost install'",
+        "echo ''",
+        "echo 'This will configure:'",
+        "echo '  • .mcp.json - MCP Server configuration'",
+        "echo '  • .claude/settings.local.json - Permissions'",
+        "echo '  • CLAUDE.md - Documentation'",
+        "echo ''",
+        "echo 'For help: php vendor/bin/symfony-boost --help'",
+        "echo ''"
+      ]
+    }
 }
