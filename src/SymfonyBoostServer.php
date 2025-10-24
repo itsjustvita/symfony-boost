@@ -8,37 +8,50 @@ use Doctrine\DBAL\Connection;
 class SymfonyBoostServer
 {
   private ?Connection $connection = null;
-  private array $connectionConfig;
+  private ?array $connectionConfig = null;
   private string $projectPath;
   private McpServer $server;
 
   public function __construct(string $databaseUrl, string $projectPath = '.')
   {
-    // Parse DATABASE_URL manually for better compatibility
-    $parsed = parse_url($databaseUrl);
-
-    // Determine driver from scheme
-    $driver = match($parsed['scheme'] ?? 'mysql') {
-      'mysql', 'mysqli' => 'pdo_mysql',
-      'pgsql', 'postgres', 'postgresql' => 'pdo_pgsql',
-      'sqlite', 'sqlite3' => 'pdo_sqlite',
-      default => 'pdo_mysql',
-    };
-
-    // Store connection config for lazy initialization (don't connect yet!)
-    $this->connectionConfig = [
-      'driver' => $driver,
-      'host' => $parsed['host'] ?? 'localhost',
-      'port' => $parsed['port'] ?? 3306,
-      'user' => $parsed['user'] ?? 'root',
-      'password' => $parsed['pass'] ?? '',
-      'dbname' => trim($parsed['path'] ?? '', '/'),
-    ];
-
     $this->projectPath = realpath($projectPath);
     $this->server = new McpServer('symfony-boost', '1.0.0-beta.5');
 
+    // Only configure database connection if Doctrine DBAL is available
+    if (class_exists(DriverManager::class)) {
+      // Parse DATABASE_URL manually for better compatibility
+      $parsed = parse_url($databaseUrl);
+
+      // Determine driver from scheme
+      $driver = match($parsed['scheme'] ?? 'mysql') {
+        'mysql', 'mysqli' => 'pdo_mysql',
+        'pgsql', 'postgres', 'postgresql' => 'pdo_pgsql',
+        'sqlite', 'sqlite3' => 'pdo_sqlite',
+        default => 'pdo_mysql',
+      };
+
+      // Store connection config for lazy initialization (don't connect yet!)
+      $this->connectionConfig = [
+        'driver' => $driver,
+        'host' => $parsed['host'] ?? 'localhost',
+        'port' => $parsed['port'] ?? 3306,
+        'user' => $parsed['user'] ?? 'root',
+        'password' => $parsed['pass'] ?? '',
+        'dbname' => trim($parsed['path'] ?? '', '/'),
+      ];
+    } else {
+      fwrite(STDERR, "⚠ Warning: Doctrine DBAL not installed. Database-related tools will be disabled.\n");
+    }
+
     $this->registerTools();
+  }
+
+  /**
+   * Check if database connection is available
+   */
+  private function hasDatabaseConnection(): bool
+  {
+    return $this->connectionConfig !== null;
   }
 
   /**
@@ -47,6 +60,10 @@ class SymfonyBoostServer
    */
   private function getConnection(): Connection
   {
+    if (!$this->hasDatabaseConnection()) {
+      throw new \RuntimeException('Database connection not available. Doctrine DBAL might not be installed.');
+    }
+
     if ($this->connection === null) {
       $this->connection = DriverManager::getConnection($this->connectionConfig);
     }
@@ -55,26 +72,273 @@ class SymfonyBoostServer
 
   private function registerTools(): void
   {
-    // Tool: application_info
+    // Register tools based on available dependencies
+    $this->registerSymfonyTools();
+
+    // Only register database tools if Doctrine DBAL is available
+    if ($this->hasDatabaseConnection()) {
+      $this->registerDatabaseTools();
+    }
+  }
+
+  /**
+   * Register Symfony-specific tools (framework, bundles, console, logs)
+   */
+  private function registerSymfonyTools(): void
+  {
+    // Tool: application_info (adapted for optional DB connection)
     $this->server->addTool(
       'application_info',
       'Returns information about the Symfony application',
       ['type' => 'object', 'properties' => new \stdClass()],
       function() {
-        $platform = $this->getConnection()->getDatabasePlatform();
-        $platformName = get_class($platform);
-        // Extract only the class name without namespace
-        $platformName = substr($platformName, strrpos($platformName, '\\') + 1);
-
-        return json_encode([
+        $result = [
           'php_version' => PHP_VERSION,
           'symfony_version' => $this->getSymfonyVersion(),
           'project_path' => $this->projectPath,
-          'database_platform' => $platformName,
+        ];
+
+        // Add database platform only if connection is available
+        if ($this->hasDatabaseConnection()) {
+          try {
+            $platform = $this->getConnection()->getDatabasePlatform();
+            $platformName = get_class($platform);
+            $platformName = substr($platformName, strrpos($platformName, '\\') + 1);
+            $result['database_platform'] = $platformName;
+          } catch (\Throwable $e) {
+            $result['database_platform'] = 'Connection failed: ' . $e->getMessage();
+          }
+        } else {
+          $result['database_platform'] = 'Not available (Doctrine DBAL not installed)';
+        }
+
+        return json_encode($result, JSON_PRETTY_PRINT);
+      }
+    );
+
+    // Tool: list_entities
+    $this->server->addTool(
+      'list_entities',
+      'Lists all Doctrine entities',
+      ['type' => 'object', 'properties' => new \stdClass()],
+      function() {
+        $entityPath = $this->projectPath . '/src/Entity';
+        if (!is_dir($entityPath)) {
+          return json_encode(['error' => 'Entity directory not found']);
+        }
+
+        $entities = [];
+        $files = glob($entityPath . '/*.php');
+
+        foreach ($files as $file) {
+          $content = file_get_contents($file);
+          $className = basename($file, '.php');
+
+          if (preg_match('/#\[ORM\\\\Entity\]|@ORM\\\\Entity/', $content)) {
+            $tableName = null;
+            if (preg_match('/#\[ORM\\\\Table\(name:\s*["\']([^"\']+)["\']/', $content, $matches)) {
+              $tableName = $matches[1];
+            }
+
+            $entities[] = [
+              'class' => $className,
+              'table' => $tableName,
+              'file' => basename($file)
+            ];
+          }
+        }
+
+        return json_encode(['entities' => $entities, 'count' => count($entities)], JSON_PRETTY_PRINT);
+      }
+    );
+
+    // Tool: read_logs
+    $this->server->addTool(
+      'read_logs',
+      'Reads the last N log entries',
+      [
+        'type' => 'object',
+        'properties' => [
+          'entries' => ['type' => 'integer', 'description' => 'Number of entries', 'default' => 50],
+          'env' => ['type' => 'string', 'description' => 'Environment (dev/prod)', 'default' => 'dev']
+        ],
+        'required' => ['entries']
+      ],
+      function(array $args) {
+        $entries = (int)($args['entries'] ?? 50);
+        $env = $args['env'] ?? 'dev';
+        $logPath = $this->projectPath . "/var/log/{$env}.log";
+
+        if (!file_exists($logPath)) {
+          return "Log file not found: {$logPath}";
+        }
+
+        $escapedPath = escapeshellarg($logPath);
+        $output = shell_exec("tail -n {$entries} {$escapedPath}");
+        return $output ?: 'No log entries';
+      }
+    );
+
+    // Tool: list_routes
+    $this->server->addTool(
+      'list_routes',
+      'Lists all Symfony routes',
+      ['type' => 'object', 'properties' => new \stdClass()],
+      function() {
+        $escapedPath = escapeshellarg($this->projectPath);
+        $output = shell_exec("cd {$escapedPath} && php bin/console debug:router --format=json 2>&1");
+        return $output ?: 'Could not retrieve routes';
+      }
+    );
+
+    // Tool: console_command
+    $this->server->addTool(
+      'console_command',
+      'Executes Symfony console commands',
+      [
+        'type' => 'object',
+        'properties' => [
+          'command' => ['type' => 'string', 'description' => 'Command (without php bin/console)']
+        ],
+        'required' => ['command']
+      ],
+      function(array $args) {
+        $command = $args['command'];
+        $escapedPath = escapeshellarg($this->projectPath);
+        $output = shell_exec("cd {$escapedPath} && php bin/console {$command} 2>&1");
+        return $output ?: 'No output';
+      }
+    );
+
+    // Tool: get_config
+    $this->server->addTool(
+      'get_config',
+      'Get configuration value using dot notation (e.g., "app.secret")',
+      [
+        'type' => 'object',
+        'properties' => [
+          'key' => ['type' => 'string', 'description' => 'Configuration key in dot notation']
+        ],
+        'required' => ['key']
+      ],
+      function(array $args) {
+        $key = $args['key'];
+        $escapedPath = escapeshellarg($this->projectPath);
+        $escapedKey = escapeshellarg($key);
+        $output = shell_exec("cd {$escapedPath} && php bin/console debug:config {$escapedKey} 2>&1");
+        return $output ?: "Configuration key '{$key}' not found";
+      }
+    );
+
+    // Tool: list_env_vars
+    $this->server->addTool(
+      'list_env_vars',
+      'Lists all available environment variables from .env files',
+      ['type' => 'object', 'properties' => new \stdClass()],
+      function() {
+        $envFiles = [
+          $this->projectPath . '/.env',
+          $this->projectPath . '/.env.local',
+        ];
+
+        $vars = [];
+        foreach ($envFiles as $envFile) {
+          if (!file_exists($envFile)) {
+            continue;
+          }
+
+          $content = file_get_contents($envFile);
+          $lines = explode("\n", $content);
+
+          foreach ($lines as $line) {
+            $line = trim($line);
+            if (empty($line) || str_starts_with($line, '#')) {
+              continue;
+            }
+
+            if (preg_match('/^([A-Z_][A-Z0-9_]*)=/', $line, $matches)) {
+              $varName = $matches[1];
+              if (!in_array($varName, $vars)) {
+                $vars[] = $varName;
+              }
+            }
+          }
+        }
+
+        sort($vars);
+        return json_encode([
+          'env_vars' => $vars,
+          'count' => count($vars)
         ], JSON_PRETTY_PRINT);
       }
     );
 
+    // Tool: last_error
+    $this->server->addTool(
+      'last_error',
+      'Reads the last error from application logs',
+      [
+        'type' => 'object',
+        'properties' => [
+          'env' => ['type' => 'string', 'description' => 'Environment (dev/prod)', 'default' => 'dev']
+        ]
+      ],
+      function(array $args) {
+        $env = $args['env'] ?? 'dev';
+        $logPath = $this->projectPath . "/var/log/{$env}.log";
+
+        if (!file_exists($logPath)) {
+          return "Log file not found: {$logPath}";
+        }
+
+        $escapedPath = escapeshellarg($logPath);
+        $output = shell_exec("tail -n 200 {$escapedPath} | grep -i 'ERROR\\|CRITICAL\\|EMERGENCY' | tail -n 10 2>&1");
+
+        if (empty($output)) {
+          return 'No errors found in recent logs';
+        }
+
+        return $output;
+      }
+    );
+
+    // Tool: list_bundles
+    $this->server->addTool(
+      'list_bundles',
+      'Lists all installed Symfony bundles',
+      ['type' => 'object', 'properties' => new \stdClass()],
+      function() {
+        $bundlesFile = $this->projectPath . '/config/bundles.php';
+
+        if (!file_exists($bundlesFile)) {
+          return json_encode(['error' => 'bundles.php not found']);
+        }
+
+        $bundles = require $bundlesFile;
+        $bundleList = [];
+
+        foreach ($bundles as $bundleClass => $envs) {
+          $bundleName = substr($bundleClass, strrpos($bundleClass, '\\') + 1);
+          $bundleList[] = [
+            'name' => $bundleName,
+            'class' => $bundleClass,
+            'environments' => array_keys(array_filter($envs))
+          ];
+        }
+
+        return json_encode([
+          'bundles' => $bundleList,
+          'count' => count($bundleList)
+        ], JSON_PRETTY_PRINT);
+      }
+    );
+  }
+
+  /**
+   * Register database-specific tools (requires Doctrine DBAL)
+   */
+  private function registerDatabaseTools(): void
+  {
     // Tool: database_query
     $this->server->addTool(
       'database_query',
@@ -176,81 +440,6 @@ class SymfonyBoostServer
       }
     );
 
-    // Tool: list_entities
-    $this->server->addTool(
-      'list_entities',
-      'Lists all Doctrine entities',
-      ['type' => 'object', 'properties' => new \stdClass()],
-      function() {
-        $entityPath = $this->projectPath . '/src/Entity';
-        if (!is_dir($entityPath)) {
-          return json_encode(['error' => 'Entity directory not found']);
-        }
-
-        $entities = [];
-        $files = glob($entityPath . '/*.php');
-
-        foreach ($files as $file) {
-          $content = file_get_contents($file);
-          $className = basename($file, '.php');
-
-          if (preg_match('/#\[ORM\\\\Entity\]|@ORM\\\\Entity/', $content)) {
-            $tableName = null;
-            if (preg_match('/#\[ORM\\\\Table\(name:\s*["\']([^"\']+)["\']/', $content, $matches)) {
-              $tableName = $matches[1];
-            }
-
-            $entities[] = [
-              'class' => $className,
-              'table' => $tableName,
-              'file' => basename($file)
-            ];
-          }
-        }
-
-        return json_encode(['entities' => $entities, 'count' => count($entities)], JSON_PRETTY_PRINT);
-      }
-    );
-
-    // Tool: read_logs
-    $this->server->addTool(
-      'read_logs',
-      'Reads the last N log entries',
-      [
-        'type' => 'object',
-        'properties' => [
-          'entries' => ['type' => 'integer', 'description' => 'Number of entries', 'default' => 50],
-          'env' => ['type' => 'string', 'description' => 'Environment (dev/prod)', 'default' => 'dev']
-        ],
-        'required' => ['entries']
-      ],
-      function(array $args) {
-        $entries = (int)($args['entries'] ?? 50);
-        $env = $args['env'] ?? 'dev';
-        $logPath = $this->projectPath . "/var/log/{$env}.log";
-
-        if (!file_exists($logPath)) {
-          return "Log file not found: {$logPath}";
-        }
-
-        $escapedPath = escapeshellarg($logPath);
-        $output = shell_exec("tail -n {$entries} {$escapedPath}");
-        return $output ?: 'No log entries';
-      }
-    );
-
-    // Tool: list_routes
-    $this->server->addTool(
-      'list_routes',
-      'Lists all Symfony routes',
-      ['type' => 'object', 'properties' => new \stdClass()],
-      function() {
-        $escapedPath = escapeshellarg($this->projectPath);
-        $output = shell_exec("cd {$escapedPath} && php bin/console debug:router --format=json 2>&1");
-        return $output ?: 'Could not retrieve routes';
-      }
-    );
-
     // Tool: get_table_sizes
     $this->server->addTool(
       'get_table_sizes',
@@ -303,153 +492,6 @@ class SymfonyBoostServer
       }
     );
 
-    // Tool: console_command
-    $this->server->addTool(
-      'console_command',
-      'Executes Symfony console commands',
-      [
-        'type' => 'object',
-        'properties' => [
-          'command' => ['type' => 'string', 'description' => 'Command (without php bin/console)']
-        ],
-        'required' => ['command']
-      ],
-      function(array $args) {
-        // Use command directly - comes from trusted source (Claude Code)
-        $command = $args['command'];
-        $escapedPath = escapeshellarg($this->projectPath);
-
-        $output = shell_exec("cd {$escapedPath} && php bin/console {$command} 2>&1");
-        return $output ?: 'No output';
-      }
-    );
-
-    // Tool: get_config
-    $this->server->addTool(
-      'get_config',
-      'Get configuration value using dot notation (e.g., "app.secret")',
-      [
-        'type' => 'object',
-        'properties' => [
-          'key' => ['type' => 'string', 'description' => 'Configuration key in dot notation']
-        ],
-        'required' => ['key']
-      ],
-      function(array $args) {
-        $key = $args['key'];
-        $escapedPath = escapeshellarg($this->projectPath);
-        $escapedKey = escapeshellarg($key);
-
-        $output = shell_exec("cd {$escapedPath} && php bin/console debug:config {$escapedKey} 2>&1");
-        return $output ?: "Configuration key '{$key}' not found";
-      }
-    );
-
-    // Tool: list_env_vars
-    $this->server->addTool(
-      'list_env_vars',
-      'Lists all available environment variables from .env files',
-      ['type' => 'object', 'properties' => new \stdClass()],
-      function() {
-        $envFiles = [
-          $this->projectPath . '/.env',
-          $this->projectPath . '/.env.local',
-        ];
-
-        $vars = [];
-        foreach ($envFiles as $envFile) {
-          if (!file_exists($envFile)) {
-            continue;
-          }
-
-          $content = file_get_contents($envFile);
-          $lines = explode("\n", $content);
-
-          foreach ($lines as $line) {
-            $line = trim($line);
-            // Skip comments and empty lines
-            if (empty($line) || str_starts_with($line, '#')) {
-              continue;
-            }
-
-            // Extract variable name
-            if (preg_match('/^([A-Z_][A-Z0-9_]*)=/', $line, $matches)) {
-              $varName = $matches[1];
-              if (!in_array($varName, $vars)) {
-                $vars[] = $varName;
-              }
-            }
-          }
-        }
-
-        sort($vars);
-        return json_encode([
-          'env_vars' => $vars,
-          'count' => count($vars)
-        ], JSON_PRETTY_PRINT);
-      }
-    );
-
-    // Tool: last_error
-    $this->server->addTool(
-      'last_error',
-      'Reads the last error from application logs',
-      [
-        'type' => 'object',
-        'properties' => [
-          'env' => ['type' => 'string', 'description' => 'Environment (dev/prod)', 'default' => 'dev']
-        ]
-      ],
-      function(array $args) {
-        $env = $args['env'] ?? 'dev';
-        $logPath = $this->projectPath . "/var/log/{$env}.log";
-
-        if (!file_exists($logPath)) {
-          return "Log file not found: {$logPath}";
-        }
-
-        $escapedPath = escapeshellarg($logPath);
-        // Get last 200 lines and search for ERROR level
-        $output = shell_exec("tail -n 200 {$escapedPath} | grep -i 'ERROR\\|CRITICAL\\|EMERGENCY' | tail -n 10 2>&1");
-
-        if (empty($output)) {
-          return 'No errors found in recent logs';
-        }
-
-        return $output;
-      }
-    );
-
-    // Tool: list_bundles
-    $this->server->addTool(
-      'list_bundles',
-      'Lists all installed Symfony bundles',
-      ['type' => 'object', 'properties' => new \stdClass()],
-      function() {
-        $bundlesFile = $this->projectPath . '/config/bundles.php';
-
-        if (!file_exists($bundlesFile)) {
-          return json_encode(['error' => 'bundles.php not found']);
-        }
-
-        $bundles = require $bundlesFile;
-        $bundleList = [];
-
-        foreach ($bundles as $bundleClass => $envs) {
-          $bundleName = substr($bundleClass, strrpos($bundleClass, '\\') + 1);
-          $bundleList[] = [
-            'name' => $bundleName,
-            'class' => $bundleClass,
-            'environments' => array_keys(array_filter($envs))
-          ];
-        }
-
-        return json_encode([
-          'bundles' => $bundleList,
-          'count' => count($bundleList)
-        ], JSON_PRETTY_PRINT);
-      }
-    );
   }
 
   public function run(): void
